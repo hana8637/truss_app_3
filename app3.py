@@ -1208,8 +1208,8 @@ def run_ladder_system(params):
 # Streamlit UI 설정 (탭 방식으로 변경)
 # ==============================================================================
 
-# 메인 타이틀 (중앙 정렬)
-st.markdown("<h1 style='text-align: center; color: #1F497D;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
+# 메인 타이틀 (중앙 정렬, 다크/라이트 모드 자동 글자색 적용)
+st.markdown("<h1 style='text-align: center;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # 큰 분류를 좌우 탭(Tab)으로 나누기
