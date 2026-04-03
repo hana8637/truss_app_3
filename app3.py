@@ -1205,11 +1205,20 @@ def run_ladder_system(params):
 
 
 # ==============================================================================
-# Streamlit UI 설정
+# Streamlit UI 설정 (탭 방식으로 변경)
 # ==============================================================================
-app_mode = st.sidebar.selectbox("작업 선택", ["1. 맞춤형 트러스 생성기", "2. 벽사다리/보강사다리 통합 산출"])
 
-if app_mode == "1. 맞춤형 트러스 생성기":
+# 메인 타이틀 (중앙 정렬)
+st.markdown("<h1 style='text-align: center; color: #1F497D;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
+st.markdown("---")
+
+# 큰 분류를 좌우 탭(Tab)으로 나누기
+tab1, tab2 = st.tabs(["📐 1. 맞춤형 트러스 생성기", "🪜 2. 벽/보강 사다리 산출"])
+
+# ------------------------------------------------------------------------------
+# [탭 1] 맞춤형 트러스 생성기
+# ------------------------------------------------------------------------------
+with tab1:
     st.header("1. 맞춤형 트러스 생성기")
     col1, col2, col3 = st.columns(3)
     
@@ -1251,7 +1260,12 @@ if app_mode == "1. 맞춤형 트러스 생성기":
         d_od = st.number_input("살대(대각) 지름(mm)", value=31.8)
         offset_mm = st.number_input("살대 이격 거리(mm)", value=20.0)
 
-    if st.button("도면 및 재단표 생성", type="primary"):
+    # col3는 공간 여백으로 남기거나 필요한 다른 옵션을 넣을 수 있습니다.
+    with col3:
+        st.empty()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("도면 및 재단표 생성", type="primary", key="btn_truss"):
         params = {'t_name': t_name, 'type_choice': type_choice, 'span_cm': span_cm, 'divs': divs,
                   'h_outer_cm': h_outer_cm, 'h_center_cm': h_center_cm, 'h_tie_cm': h_tie_cm,
                   'm_od': m_od, 'v_od': v_od, 'r_od': r_od, 'd_od': d_od, 'offset_mm': offset_mm}
@@ -1268,43 +1282,48 @@ if app_mode == "1. 맞춤형 트러스 생성기":
             with d_col2:
                 st.download_button(label="📥 엑셀 재단표 다운로드", data=excel_bytes, file_name=excel_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-elif app_mode == "2. 벽사다리/보강사다리 통합 산출":
+
+# ------------------------------------------------------------------------------
+# [탭 2] 벽사다리/보강사다리 통합 산출
+# ------------------------------------------------------------------------------
+with tab2:
     st.header("2. 벽사다리 및 보강사다리 통합 산출 시스템")
     col1, col2, col3 = st.columns(3)
     
     with col1:
         st.subheader("1. 기본 치수 (중심선 기준)")
-        L_cm = st.number_input("전체 총기장(cm)", value=2000.0)
-        W_cm = st.number_input("보강사다리 폭(cm)", value=70.0)
-        H_truss_cm = st.number_input("메인사다리 높이(폭)(cm)", value=70.0)
-        total_sets_sub = st.number_input("보강사다리 총 제작 수량(세트)", value=1, step=1)
-        total_sets_main = st.number_input("메인사다리 총 제작 수량(세트)", value=1, step=1)
-        offset_mm = st.number_input("살대 다대 꼭지점 이격 거리(mm)", value=10.0)
+        L_cm = st.number_input("전체 총기장(cm)", value=2000.0, key="L_cm")
+        W_cm = st.number_input("보강사다리 폭(cm)", value=70.0, key="W_cm")
+        H_truss_cm = st.number_input("메인사다리 높이(폭)(cm)", value=70.0, key="H_truss_cm")
+        total_sets_sub = st.number_input("보강사다리 총 제작 수량(세트)", value=1, step=1, key="sub_sets")
+        total_sets_main = st.number_input("메인사다리 총 제작 수량(세트)", value=1, step=1, key="main_sets")
+        offset_mm_ladder = st.number_input("살대 다대 꼭지점 이격 거리(mm)", value=10.0, key="offset_ladder")
         
     with col2:
         st.subheader("2. 용마루 & 벽사다리")
-        H_ridge_cm = st.number_input("용마루 폭(높이)(cm)", value=70.0)
-        ridge_deduct_mm = st.number_input("용마루 공제 기준 사이즈(mm)", value=59.9)
-        total_sets_ridge = st.number_input("용마루 전체 라인 제작 수량(세트)", value=1, step=1)
-        wall_snagi_mm = st.number_input("벽사다리 스나기 사이즈(mm)", value=89.1)
+        H_ridge_cm = st.number_input("용마루 폭(높이)(cm)", value=70.0, key="H_ridge")
+        ridge_deduct_mm = st.number_input("용마루 공제 기준 사이즈(mm)", value=59.9, key="ridge_deduct")
+        total_sets_ridge = st.number_input("용마루 전체 라인 제작 수량(세트)", value=1, step=1, key="ridge_sets")
+        wall_snagi_mm = st.number_input("벽사다리 스나기 사이즈(mm)", value=89.1, key="wall_snagi")
         
     with col3:
         st.subheader("3. 파이프 규격(mm)")
-        p_sub_main = st.number_input("보강사다리 상하현재 지름(mm)", value=38.1)
-        p_sub_sub = st.number_input("보강사다리 수직/사재 지름(mm)", value=31.8)
-        p_main_main = st.number_input("메인사다리 상하현재 지름(mm)", value=42.2)
-        p_main_snagi = st.number_input("메인사다리 스나기 지름(mm)", value=89.1)
-        p_main_v = st.number_input("메인사다리 수직다대 지름(mm)", value=38.1)
-        p_main_diag = st.number_input("메인사다리 사다리살대 지름(mm)", value=31.8)
-        p_ridge_main = st.number_input("용마루 상하현재 지름(mm)", value=42.2)
-        p_ridge_v = st.number_input("용마루 수직다대 지름(mm)", value=38.1)
-        p_ridge_diag = st.number_input("용마루 사다리살대 지름(mm)", value=31.8)
+        p_sub_main = st.number_input("보강사다리 상하현재 지름(mm)", value=38.1, key="p_sub_main")
+        p_sub_sub = st.number_input("보강사다리 수직/사재 지름(mm)", value=31.8, key="p_sub_sub")
+        p_main_main = st.number_input("메인사다리 상하현재 지름(mm)", value=42.2, key="p_main_main")
+        p_main_snagi = st.number_input("메인사다리 스나기 지름(mm)", value=89.1, key="p_main_snagi")
+        p_main_v = st.number_input("메인사다리 수직다대 지름(mm)", value=38.1, key="p_main_v")
+        p_main_diag = st.number_input("메인사다리 사다리살대 지름(mm)", value=31.8, key="p_main_diag")
+        p_ridge_main = st.number_input("용마루 상하현재 지름(mm)", value=42.2, key="p_ridge_main")
+        p_ridge_v = st.number_input("용마루 수직다대 지름(mm)", value=38.1, key="p_ridge_v")
+        p_ridge_diag = st.number_input("용마루 사다리살대 지름(mm)", value=31.8, key="p_ridge_diag")
         
-    if st.button("산출표 및 도면 생성", type="primary"):
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("산출표 및 도면 생성", type="primary", key="btn_ladder"):
         params = {
             'L_cm': L_cm, 'W_cm': W_cm, 'H_truss_cm': H_truss_cm, 
             'total_sets_sub': total_sets_sub, 'total_sets_main': total_sets_main,
-            'offset_mm': offset_mm, 'H_ridge_cm': H_ridge_cm, 
+            'offset_mm': offset_mm_ladder, 'H_ridge_cm': H_ridge_cm, 
             'ridge_deduct_mm': ridge_deduct_mm, 'total_sets_ridge': total_sets_ridge,
             'wall_snagi_mm': wall_snagi_mm, 'p_sub_main': p_sub_main, 'p_sub_sub': p_sub_sub,
             'p_main_main': p_main_main, 'p_main_snagi': p_main_snagi, 'p_main_v': p_main_v,
@@ -1322,4 +1341,3 @@ elif app_mode == "2. 벽사다리/보강사다리 통합 산출":
                 st.download_button(label="📥 PDF 상세도면 다운로드", data=pdf_buffer, file_name=pdf_name, mime="application/pdf")
             with d_col2:
                 st.download_button(label="📥 엑셀 종합산출표 다운로드", data=excel_bytes, file_name=excel_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-     
