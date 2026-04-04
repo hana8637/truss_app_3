@@ -38,7 +38,6 @@ st.set_page_config(page_title="하나천막기업 자재 산출 시스템", layo
 def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, angle2_deg):
     """
     [레이저 알가공 전용] Tip-to-Tip 최대 실재단기장 도출 함수
-    단위 무관 (모두 mm 이거나 모두 cm 이면 정상 작동)
     """
     r = d_strut / 2.0
     R1 = d_chord1 / 2.0
@@ -49,7 +48,7 @@ def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, an
         if angle_deg <= 0.1: return 0
         rad = math.radians(angle_deg)
         
-        # 파이프 가장자리가 곡면에 파고드는 수학적 한계치 (새부리 모양)
+        # 파이프 측면 귀(Ear)가 파고드는 최대 한계치
         val = R**2 - r**2
         limit_ear = math.sqrt(val) if val > 0 else 0
         limit_toe = (R - r * math.cos(rad)) / math.sin(rad)
@@ -59,7 +58,7 @@ def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, an
     ear1 = get_ear_extension(R1, r, angle1_deg)
     ear2 = get_ear_extension(R2, r, angle2_deg)
     
-    # 두 파이프 중심선 간의 거리에서 맞닿는 양 끝단의 귀(Ear) 위치를 뺌
+    # 3D 중심선 거리에서 파이프가 파고드는 가장 깊은 귀(Ear) 거리를 뺌
     return center_len - ear1 - ear2
 
 
@@ -67,7 +66,6 @@ def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, an
 # [1] 트러스 시스템 함수
 # ==============================================================================
 def save_formatted_excel_bytes(raw_data):
-    """트러스 전용 엑셀 저장 및 서식 지정 로직 (메모리 저장 방식)"""
     df = pd.DataFrame(raw_data)
     df_grouped = df.groupby(["구분", "품명", "재단기장(L)", "상단 가공각(°)", "하단 가공각(°)"]).size().reset_index(name='1대당 수량')
     
@@ -323,12 +321,6 @@ def generate_custom_truss(params):
     def get_chord_y_bot(x):
         return get_y_bot(x) + get_thick(get_y_bot, x, m_od)
 
-    # 중심선 Y좌표 추출 함수 (알가공 계산용)
-    def get_center_y_top(x):
-        return get_y_top(x) - get_thick(get_y_top, x, m_od/2)
-    def get_center_y_bot(x):
-        return get_y_bot(x) + get_thick(get_y_bot, x, m_od/2)
-
     def draw_dim_text(ax, x, y, text, angle=0, color='black', fontsize=11.5):
         if angle > 90: angle -= 180
         elif angle < -90: angle += 180
@@ -507,26 +499,29 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                dx_line, dy_line = px_top - px_bot, py_top - py_bot
-                diag_ang = math.degrees(math.atan2(dy_line, dx_line))
+                # --- 🔴 내경 벡터를 중심선까지 외삽(Extrapolate)하여 3D 기장 도출 ---
+                dx_line = px_top - px_bot
+                dy_line = py_top - py_bot
+                diag_l_inner = math.hypot(dx_line, dy_line)
+                angle_rad = math.atan2(dy_line, dx_line)
+                diag_ang = math.degrees(angle_rad)
                 
-                t_slope = get_slope(get_y_top, px_top)
-                b_slope = get_slope(get_y_bot, px_bot)
+                t_slope_rad = math.radians(get_slope(get_y_top, px_top))
+                b_slope_rad = math.radians(get_slope(get_y_bot, px_bot))
                 
-                t_intersect = abs(diag_ang - t_slope) % 180
-                if t_intersect > 90: t_intersect = 180 - t_intersect
-                d_top_angle = int(round(abs(90.0 - t_intersect)))
+                t_intersect_rad = angle_rad - t_slope_rad
+                b_intersect_rad = angle_rad - b_slope_rad
                 
-                b_intersect = abs(diag_ang - b_slope) % 180
-                if b_intersect > 90: b_intersect = 180 - b_intersect
-                d_bot_angle = int(round(abs(90.0 - b_intersect)))
-
-                # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
-                cx_bot, cy_bot = px_bot, get_center_y_bot(px_bot)
-                cx_top, cy_top = px_top, get_center_y_top(px_top)
-                c2c_len = math.hypot(cx_top - cx_bot, cy_top - cy_bot)
+                d_top_angle = int(round(abs(math.degrees(t_intersect_rad))))
+                d_bot_angle = int(round(abs(math.degrees(b_intersect_rad))))
+                if d_top_angle > 90: d_top_angle = 180 - d_top_angle
+                if d_bot_angle > 90: d_bot_angle = 180 - d_bot_angle
                 
-                # offset은 이미 wx_start, wx_end 에서 처리되었으므로 함수 내에서는 0으로 대입
+                # 중심선까지의 연장 길이 (외경/2를 각도로 나눔)
+                extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
+                extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
+                
+                c2c_len = diag_l_inner + extend_top + extend_bot
                 laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                 
                 mx, my = (px_bot + px_top) / 2, (py_bot + py_top) / 2
@@ -596,33 +591,35 @@ def generate_custom_truss(params):
                     poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                     ax.add_patch(poly)
                     
-                    dx_line, dy_line = px_top - px_bot, py_top - py_bot
-                    diag_ang = math.degrees(math.atan2(dy_line, dx_line))
+                    # --- 🔴 내경 벡터 연장을 통한 3D 길이 계산 ---
+                    dx_line = px_top - px_bot
+                    dy_line = py_top - py_bot
+                    diag_l_inner = math.hypot(dx_line, dy_line)
+                    angle_rad = math.atan2(dy_line, dx_line)
+                    diag_ang = math.degrees(angle_rad)
                     
                     if gubun_name == "상단살대":
-                        t_slope = get_slope(get_y_top, px_top)
-                        b_slope = 0.0
+                        t_slope_rad = math.radians(get_slope(get_y_top, px_top))
+                        b_slope_rad = 0.0
                     else:
-                        t_slope = 0.0 
-                        b_slope = get_slope(get_y_bot, px_bot)
+                        t_slope_rad = 0.0 
+                        b_slope_rad = math.radians(get_slope(get_y_bot, px_bot))
                         
-                    t_intersect = abs(diag_ang - t_slope) % 180
-                    if t_intersect > 90: t_intersect = 180 - t_intersect
-                    d_top_angle = int(round(abs(90.0 - t_intersect)))
+                    t_intersect_rad = angle_rad - t_slope_rad
+                    b_intersect_rad = angle_rad - b_slope_rad
                     
-                    b_intersect = abs(diag_ang - b_slope) % 180
-                    if b_intersect > 90: b_intersect = 180 - b_intersect
-                    d_bot_angle = int(round(abs(90.0 - b_intersect)))
+                    d_top_angle = abs(math.degrees(t_intersect_rad)) % 180
+                    if d_top_angle > 90: d_top_angle = 180 - d_top_angle
+                    d_top_angle = int(round(d_top_angle))
                     
-                    # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
-                    if gubun_name == "상단살대":
-                        cx_bot, cy_bot = px_bot, H_mid_top - m_od/2
-                        cx_top, cy_top = px_top, get_center_y_top(px_top)
-                    else:
-                        cx_bot, cy_bot = px_bot, get_center_y_bot(px_bot)
-                        cx_top, cy_top = px_top, H_mid_bot + m_od/2
-                    c2c_len = math.hypot(cx_top - cx_bot, cy_top - cy_bot)
+                    d_bot_angle = abs(math.degrees(b_intersect_rad)) % 180
+                    if d_bot_angle > 90: d_bot_angle = 180 - d_bot_angle
+                    d_bot_angle = int(round(d_bot_angle))
                     
+                    extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
+                    extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
+                    
+                    c2c_len = diag_l_inner + extend_top + extend_bot
                     laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                     
                     mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
@@ -781,25 +778,31 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                dx_diff, dy_diff = px_top - px_bot, py_top - py_bot
-                diag_ang = math.degrees(math.atan2(dy_diff, dx_diff))
+                # --- 🔴 내경 벡터 연장을 통한 3D 길이 계산 ---
+                dx_diff = px_top - px_bot
+                dy_diff = py_top - py_bot
+                diag_l_inner = math.hypot(dx_diff, dy_diff)
+                angle_rad = math.atan2(dy_diff, dx_diff)
+                diag_ang = math.degrees(angle_rad)
                 
-                t_slope = get_slope(get_y_bot, px_top)
-                b_slope = 0.0
+                t_slope_rad = math.radians(get_slope(get_y_bot, px_top))
+                b_slope_rad = 0.0
                 
-                t_intersect = abs(diag_ang - t_slope) % 180
-                if t_intersect > 90: t_intersect = 180 - t_intersect
-                d_top_angle = int(round(abs(90.0 - t_intersect)))
+                t_intersect_rad = angle_rad - t_slope_rad
+                b_intersect_rad = angle_rad - b_slope_rad
                 
-                b_intersect = abs(diag_ang - b_slope) % 180
-                if b_intersect > 90: b_intersect = 180 - b_intersect
-                d_bot_angle = int(round(abs(90.0 - b_intersect)))
+                d_top_angle = abs(math.degrees(t_intersect_rad)) % 180
+                if d_top_angle > 90: d_top_angle = 180 - d_top_angle
+                d_top_angle = int(round(d_top_angle))
                 
-                # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
-                cx_bot, cy_bot = px_bot, H_tie
-                cx_top, cy_top = px_top, get_center_y_bot(px_top)
-                c2c_len = math.hypot(cx_top - cx_bot, cy_top - cy_bot)
+                d_bot_angle = abs(math.degrees(b_intersect_rad)) % 180
+                if d_bot_angle > 90: d_bot_angle = 180 - d_bot_angle
+                d_bot_angle = int(round(d_bot_angle))
                 
+                extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
+                extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
+                
+                c2c_len = diag_l_inner + extend_top + extend_bot
                 laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                 
                 mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
@@ -864,7 +867,6 @@ def get_6m_count(total_cm):
     return math.ceil(total_cm / 600.0)
 
 def save_ladder_excel_bytes(data, L_cm):
-    """사다리 통합 산출표 전용 엑셀 서식 적용 및 메모리 반환"""
     df = pd.DataFrame(data, columns=["항목", "규격", "수량(개/줄)", "단위길이(cm)", "총연장(cm)", "6m본수/비고"])
     output = io.BytesIO()
     
@@ -940,7 +942,6 @@ def draw_diag_poly(ax, x_start_tip, x_end_tip, y_bot, y_top, w_half, is_forward,
     ax.add_patch(poly)
 
 def run_ladder_system(params):
-    """벽사다리 통합 산출 시스템"""
     L_cm = params['L_cm']
     W_cm = params['W_cm']
     H_truss_cm = params['H_truss_cm']
@@ -1004,12 +1005,16 @@ def run_ladder_system(params):
             dx_center = eff_spacing - 2 * W_half
             if dx_center < 0: dx_center = 0.1
             
-        angle_deg = math.degrees(math.atan2(v_len, dx_center))
+        diag_l_inner = math.hypot(dx_center, v_len)
+        angle_rad = math.atan2(v_len, dx_center)
+        angle_deg = math.degrees(angle_rad)
         cut_angle = 90.0 - angle_deg
         
-        # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
-        c2c_h = v_len + (t_chord_top/2) + (t_chord_bot/2)
-        c2c_len = math.hypot(dx_center, c2c_h)
+        # --- 🔴 내경 벡터 연장을 통한 3D 길이 계산 ---
+        extend_bot = (t_chord_bot / 2) / math.sin(angle_rad)
+        extend_top = (t_chord_top / 2) / math.sin(angle_rad)
+        
+        c2c_len = diag_l_inner + extend_bot + extend_top
         laser_len = get_laser_cut_length(c2c_len, t_diag, t_chord_top, angle_deg, t_chord_bot, angle_deg)
 
         return laser_len, cut_angle, angle_deg, W_half
