@@ -31,9 +31,37 @@ except ImportError:
     st.error("openpyxl 라이브러리가 필요합니다.")
 
 # ==============================================================================
-# 공통 설정
+# 공통 설정 및 레이저 알가공(R가공) 전용 코어 함수
 # ==============================================================================
 st.set_page_config(page_title="하나천막기업 자재 산출 시스템", layout="wide")
+
+def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, angle2_deg):
+    """
+    [레이저 알가공 전용] Tip-to-Tip 최대 실재단기장 도출 함수
+    단위 무관 (모두 mm 이거나 모두 cm 이면 정상 작동)
+    """
+    r = d_strut / 2.0
+    R1 = d_chord1 / 2.0
+    R2 = d_chord2 / 2.0
+
+    def get_ear_extension(R, r, angle_deg):
+        if angle_deg >= 90: angle_deg = 180 - angle_deg
+        if angle_deg <= 0.1: return 0
+        rad = math.radians(angle_deg)
+        
+        # 파이프 가장자리가 곡면에 파고드는 수학적 한계치 (새부리 모양)
+        val = R**2 - r**2
+        limit_ear = math.sqrt(val) if val > 0 else 0
+        limit_toe = (R - r * math.cos(rad)) / math.sin(rad)
+        
+        return min(limit_ear, limit_toe)
+
+    ear1 = get_ear_extension(R1, r, angle1_deg)
+    ear2 = get_ear_extension(R2, r, angle2_deg)
+    
+    # 두 파이프 중심선 간의 거리에서 맞닿는 양 끝단의 귀(Ear) 위치를 뺌
+    return center_len - ear1 - ear2
+
 
 # ==============================================================================
 # [1] 트러스 시스템 함수
@@ -295,6 +323,12 @@ def generate_custom_truss(params):
     def get_chord_y_bot(x):
         return get_y_bot(x) + get_thick(get_y_bot, x, m_od)
 
+    # 중심선 Y좌표 추출 함수 (알가공 계산용)
+    def get_center_y_top(x):
+        return get_y_top(x) - get_thick(get_y_top, x, m_od/2)
+    def get_center_y_bot(x):
+        return get_y_bot(x) + get_thick(get_y_bot, x, m_od/2)
+
     def draw_dim_text(ax, x, y, text, angle=0, color='black', fontsize=11.5):
         if angle > 90: angle -= 180
         elif angle < -90: angle += 180
@@ -455,8 +489,6 @@ def generate_custom_truss(params):
                 py_bot = get_chord_y_bot(px_bot)
                 py_top = get_chord_y_top(px_top)
                 
-                diag_l = math.hypot(px_top - px_bot, py_top - py_bot)
-                
                 if is_forward:
                     x_bl, x_br = px_bot - w_half, px_bot + w_half
                     x_tr, x_tl = px_top + w_half, px_top - w_half
@@ -489,12 +521,20 @@ def generate_custom_truss(params):
                 if b_intersect > 90: b_intersect = 180 - b_intersect
                 d_bot_angle = int(round(abs(90.0 - b_intersect)))
 
+                # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
+                cx_bot, cy_bot = px_bot, get_center_y_bot(px_bot)
+                cx_top, cy_top = px_top, get_center_y_top(px_top)
+                c2c_len = math.hypot(cx_top - cx_bot, cy_top - cy_bot)
+                
+                # offset은 이미 wx_start, wx_end 에서 처리되었으므로 함수 내에서는 0으로 대입
+                laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
+                
                 mx, my = (px_bot + px_top) / 2, (py_bot + py_top) / 2
-                draw_dim_text(ax, mx, my, f"L:{diag_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=11)
+                draw_dim_text(ax, mx, my, f"L:{laser_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=11)
 
                 raw_data.append({
                     "구분": "살대", "품명": f"{d_od}mm 파이프",
-                    "재단기장(L)": round(diag_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
+                    "재단기장(L)": round(laser_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
                 })
 
             if is_double_bot:
@@ -525,8 +565,6 @@ def generate_custom_truss(params):
                         py_bot = get_chord_y_bot(px_bot)
                         
                     if py_top <= py_bot: return 
-                    
-                    diag_l = math.hypot(px_top - px_bot, py_top - py_bot)
                     
                     if is_forward:
                         x_bl, x_br = px_bot - w_half, px_bot + w_half
@@ -576,12 +614,23 @@ def generate_custom_truss(params):
                     if b_intersect > 90: b_intersect = 180 - b_intersect
                     d_bot_angle = int(round(abs(90.0 - b_intersect)))
                     
+                    # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
+                    if gubun_name == "상단살대":
+                        cx_bot, cy_bot = px_bot, H_mid_top - m_od/2
+                        cx_top, cy_top = px_top, get_center_y_top(px_top)
+                    else:
+                        cx_bot, cy_bot = px_bot, get_center_y_bot(px_bot)
+                        cx_top, cy_top = px_top, H_mid_bot + m_od/2
+                    c2c_len = math.hypot(cx_top - cx_bot, cy_top - cy_bot)
+                    
+                    laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
+                    
                     mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
-                    draw_dim_text(ax, mx, my, f"L:{diag_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=10)
+                    draw_dim_text(ax, mx, my, f"L:{laser_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=10)
                     
                     raw_data.append({
                         "구분": gubun_name, "품명": f"{d_od}mm 파이프",
-                        "재단기장(L)": round(diag_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
+                        "재단기장(L)": round(laser_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
                     })
 
                 is_forward_u = not (is_half or i < mid_idx)
@@ -714,8 +763,6 @@ def generate_custom_truss(params):
                 py_bot = y_bot_limit
                 py_top = get_y_bot(px_top) 
                 
-                diag_l = math.hypot(px_top - px_bot, py_top - py_bot)
-                
                 if is_forward_tie:
                     x_bl, x_br = wx_start, wx_start + 2*w_half_tie
                     x_tr, x_tl = wx_end, wx_end - 2*w_half_tie
@@ -748,11 +795,18 @@ def generate_custom_truss(params):
                 if b_intersect > 90: b_intersect = 180 - b_intersect
                 d_bot_angle = int(round(abs(90.0 - b_intersect)))
                 
+                # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
+                cx_bot, cy_bot = px_bot, H_tie
+                cx_top, cy_top = px_top, get_center_y_bot(px_top)
+                c2c_len = math.hypot(cx_top - cx_bot, cy_top - cy_bot)
+                
+                laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
+                
                 mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
-                draw_dim_text(ax, mx, my, f"L:{diag_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#b8860b', fontsize=11)
+                draw_dim_text(ax, mx, my, f"L:{laser_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#b8860b', fontsize=11)
                 
                 raw_data.append({
-                    "구분": "수평내부살대", "품명": f"{d_od}mm 파이프", "재단기장(L)": round(diag_l, 1),
+                    "구분": "수평내부살대", "품명": f"{d_od}mm 파이프", "재단기장(L)": round(laser_l, 1),
                     "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
                 })
 
@@ -939,7 +993,7 @@ def run_ladder_system(params):
     gap_s = (L_cm - t_sub_sub_cm) / n_sec_s
     dx_s = offset_cm 
     
-    def calc_diag(spacing, v_len, left_r, right_r, t_diag):
+    def calc_diag(spacing, v_len, left_r, right_r, t_diag, t_chord_top, t_chord_bot):
         eff_spacing = spacing - left_r - right_r - (2 * offset_cm)
         dx_center = eff_spacing
         W_half = 0
@@ -950,14 +1004,24 @@ def run_ladder_system(params):
             dx_center = eff_spacing - 2 * W_half
             if dx_center < 0: dx_center = 0.1
             
-        actual_diag = math.sqrt(dx_center**2 + v_len**2)
         angle_deg = math.degrees(math.atan2(v_len, dx_center))
         cut_angle = 90.0 - angle_deg
-        return actual_diag, cut_angle, angle_deg, W_half
+        
+        # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
+        c2c_h = v_len + (t_chord_top/2) + (t_chord_bot/2)
+        c2c_len = math.hypot(dx_center, c2c_h)
+        laser_len = get_laser_cut_length(c2c_len, t_diag, t_chord_top, angle_deg, t_chord_bot, angle_deg)
 
-    actual_sub_diag_len, sub_cut_angle, angle_s_deg, w_half_s = calc_diag(gap_s, actual_sub_v_len, t_sub_sub_cm/2, t_sub_sub_cm/2, t_sub_sub_cm)
-    diag_len_snagi, cut_angle_snagi, angle_m_snagi_deg, w_half_m_snagi = calc_diag(sub_gap, actual_main_v_len, t_main_snagi_cm/2, t_main_v_cm/2, t_main_diag_cm)
-    diag_len_norm, cut_angle_norm, angle_m_norm_deg, w_half_m_norm = calc_diag(sub_gap, actual_main_v_len, t_main_v_cm/2, t_main_v_cm/2, t_main_diag_cm)
+        return laser_len, cut_angle, angle_deg, W_half
+
+    actual_sub_diag_len, sub_cut_angle, angle_s_deg, w_half_s = calc_diag(
+        gap_s, actual_sub_v_len, t_sub_sub_cm/2, t_sub_sub_cm/2, t_sub_sub_cm, t_sub_main_cm, t_sub_main_cm)
+    
+    diag_len_snagi, cut_angle_snagi, angle_m_snagi_deg, w_half_m_snagi = calc_diag(
+        sub_gap, actual_main_v_len, t_main_snagi_cm/2, t_main_v_cm/2, t_main_diag_cm, t_main_main_cm, t_main_main_cm)
+        
+    diag_len_norm, cut_angle_norm, angle_m_norm_deg, w_half_m_norm = calc_diag(
+        sub_gap, actual_main_v_len, t_main_v_cm/2, t_main_v_cm/2, t_main_diag_cm, t_main_main_cm, t_main_main_cm)
 
     L_ridge_mid = gap_m - ridge_deduct_cm
     L_ridge_end = gap_m - 1.5 * ridge_deduct_cm
@@ -971,9 +1035,12 @@ def run_ladder_system(params):
     S_mid_deep = sub_gap - (ridge_deduct_cm / 2)
     S_end_deep = sub_gap - ridge_deduct_cm
 
-    diag_norm, cut_norm, _, w_half_r_norm = calc_diag(S_norm, actual_ridge_v_len, t_ridge_v_cm/2, t_ridge_v_cm/2, t_ridge_diag_cm)
-    diag_mid_c, cut_mid_c, _, w_half_r_mid = calc_diag(S_mid_deep, actual_ridge_v_len, ridge_deduct_cm/2, t_ridge_v_cm/2, t_ridge_diag_cm)
-    diag_end_c, cut_end_c, _, w_half_r_end = calc_diag(S_end_deep, actual_ridge_v_len, ridge_deduct_cm/2, ridge_deduct_cm/2, t_ridge_diag_cm)
+    diag_norm, cut_norm, _, w_half_r_norm = calc_diag(
+        S_norm, actual_ridge_v_len, t_ridge_v_cm/2, t_ridge_v_cm/2, t_ridge_diag_cm, t_ridge_main_cm, t_ridge_main_cm)
+    diag_mid_c, cut_mid_c, _, w_half_r_mid = calc_diag(
+        S_mid_deep, actual_ridge_v_len, ridge_deduct_cm/2, t_ridge_v_cm/2, t_ridge_diag_cm, t_ridge_main_cm, t_ridge_main_cm)
+    diag_end_c, cut_end_c, _, w_half_r_end = calc_diag(
+        S_end_deep, actual_ridge_v_len, ridge_deduct_cm/2, ridge_deduct_cm/2, t_ridge_diag_cm, t_ridge_main_cm, t_ridge_main_cm)
 
     L_wall_single = gap_m - 2.0 * wall_snagi_cm
     L_wall_end = gap_m - 1.5 * wall_snagi_cm
@@ -1172,7 +1239,7 @@ def run_ladder_system(params):
                     l_r = ridge_deduct_cm/2 if j == 0 else t_ridge_v_cm/2
                     r_r = ridge_deduct_cm/2 if j == 3 else t_ridge_v_cm/2
                     
-                    diag_len, cut_angle, angle_rad, w_half_r = calc_diag(span_dist, actual_ridge_v_len, l_r, r_r, t_ridge_diag_cm)
+                    diag_len, cut_angle, angle_rad, w_half_r = calc_diag(span_dist, actual_ridge_v_len, l_r, r_r, t_ridge_diag_cm, t_ridge_main_cm, t_ridge_main_cm)
                     start_tip_r = v_centers[j] + l_r + dx_m
                     end_tip_r = v_centers[j+1] - r_r - dx_m
                     mid_span_x = (v_centers[j] + v_centers[j+1]) / 2
@@ -1208,8 +1275,8 @@ def run_ladder_system(params):
 # Streamlit UI 설정 (탭 방식으로 변경)
 # ==============================================================================
 
-# 메인 타이틀 (중앙 정렬, 다크/라이트 모드 자동 글자색 적용)
-st.markdown("<h1 style='text-align: center;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
+# 메인 타이틀 (중앙 정렬)
+st.markdown("<h1 style='text-align: center; color: #1F497D;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # 큰 분류를 좌우 탭(Tab)으로 나누기
@@ -1260,7 +1327,6 @@ with tab1:
         d_od = st.number_input("살대(대각) 지름(mm)", value=31.8)
         offset_mm = st.number_input("살대 이격 거리(mm)", value=20.0)
 
-    # col3는 공간 여백으로 남기거나 필요한 다른 옵션을 넣을 수 있습니다.
     with col3:
         st.empty()
 
