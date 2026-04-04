@@ -31,14 +31,12 @@ except ImportError:
     st.error("openpyxl 라이브러리가 필요합니다.")
 
 # ==============================================================================
-# 공통 설정 및 레이저 알가공(R가공) 전용 코어 함수
+# 공통 설정 및 레이저 가공(R가공) 전용 함수
 # ==============================================================================
 st.set_page_config(page_title="하나천막기업 자재 산출 시스템", layout="wide")
 
 def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, angle2_deg):
-    """
-    [레이저 알가공 전용] Tip-to-Tip 최대 실재단기장 도출 함수
-    """
+    """[레이저 알가공 전용] 파이프 Tip-to-Tip 최대 기장 산출 함수"""
     r = d_strut / 2.0
     R1 = d_chord1 / 2.0
     R2 = d_chord2 / 2.0
@@ -47,18 +45,14 @@ def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, an
         if angle_deg >= 90: angle_deg = 180 - angle_deg
         if angle_deg <= 0.1: return 0
         rad = math.radians(angle_deg)
-        
-        # 파이프 측면 귀(Ear)가 파고드는 최대 한계치
         val = R**2 - r**2
         limit_ear = math.sqrt(val) if val > 0 else 0
         limit_toe = (R - r * math.cos(rad)) / math.sin(rad)
-        
         return min(limit_ear, limit_toe)
 
     ear1 = get_ear_extension(R1, r, angle1_deg)
     ear2 = get_ear_extension(R2, r, angle2_deg)
     
-    # 3D 중심선 거리에서 파이프가 파고드는 가장 깊은 귀(Ear) 거리를 뺌
     return center_len - ear1 - ear2
 
 
@@ -66,6 +60,7 @@ def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, an
 # [1] 트러스 시스템 함수
 # ==============================================================================
 def save_formatted_excel_bytes(raw_data):
+    """트러스 전용 엑셀 저장 및 서식 지정 로직 (메모리 저장 방식)"""
     df = pd.DataFrame(raw_data)
     df_grouped = df.groupby(["구분", "품명", "재단기장(L)", "상단 가공각(°)", "하단 가공각(°)"]).size().reset_index(name='1대당 수량')
     
@@ -499,37 +494,33 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                # --- 🔴 내경 벡터를 중심선까지 외삽(Extrapolate)하여 3D 기장 도출 ---
-                dx_line = px_top - px_bot
-                dy_line = py_top - py_bot
-                diag_l_inner = math.hypot(dx_line, dy_line)
-                angle_rad = math.atan2(dy_line, dx_line)
-                diag_ang = math.degrees(angle_rad)
+                # --- 🔴 [수정] 레이저 가공용 C2C 및 팁 길이 계산 ---
+                dx_line, dy_line = px_top - px_bot, py_top - py_bot
+                diag_ang = math.degrees(math.atan2(dy_line, dx_line))
                 
-                t_slope_rad = math.radians(get_slope(get_y_top, px_top))
-                b_slope_rad = math.radians(get_slope(get_y_bot, px_bot))
+                t_slope = get_slope(get_y_top, px_top)
+                b_slope = get_slope(get_y_bot, px_bot)
                 
-                t_intersect_rad = angle_rad - t_slope_rad
-                b_intersect_rad = angle_rad - b_slope_rad
+                t_intersect = abs(diag_ang - t_slope) % 180
+                if t_intersect > 90: t_intersect = 180 - t_intersect
+                d_top_angle = int(round(abs(90.0 - t_intersect)))
                 
-                d_top_angle = int(round(abs(math.degrees(t_intersect_rad))))
-                d_bot_angle = int(round(abs(math.degrees(b_intersect_rad))))
-                if d_top_angle > 90: d_top_angle = 180 - d_top_angle
-                if d_bot_angle > 90: d_bot_angle = 180 - d_bot_angle
+                b_intersect = abs(diag_ang - b_slope) % 180
+                if b_intersect > 90: b_intersect = 180 - b_intersect
+                d_bot_angle = int(round(abs(90.0 - b_intersect)))
                 
-                # 중심선까지의 연장 길이 (외경/2를 각도로 나눔)
-                extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
-                extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
+                cy_bot = get_y_bot(px_bot) + get_thick(get_y_bot, px_bot, m_od/2)
+                cy_top = get_y_top(px_top) - get_thick(get_y_top, px_top, m_od/2)
+                c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
                 
-                c2c_len = diag_l_inner + extend_top + extend_bot
-                laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
+                diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                 
                 mx, my = (px_bot + px_top) / 2, (py_bot + py_top) / 2
-                draw_dim_text(ax, mx, my, f"L:{laser_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=11)
+                draw_dim_text(ax, mx, my, f"L:{diag_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=11)
 
                 raw_data.append({
                     "구분": "살대", "품명": f"{d_od}mm 파이프",
-                    "재단기장(L)": round(laser_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
+                    "재단기장(L)": round(diag_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
                 })
 
             if is_double_bot:
@@ -591,43 +582,38 @@ def generate_custom_truss(params):
                     poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                     ax.add_patch(poly)
                     
-                    # --- 🔴 내경 벡터 연장을 통한 3D 길이 계산 ---
-                    dx_line = px_top - px_bot
-                    dy_line = py_top - py_bot
-                    diag_l_inner = math.hypot(dx_line, dy_line)
-                    angle_rad = math.atan2(dy_line, dx_line)
-                    diag_ang = math.degrees(angle_rad)
+                    # --- 🔴 [수정] 레이저 가공용 C2C 및 팁 길이 계산 ---
+                    dx_line, dy_line = px_top - px_bot, py_top - py_bot
+                    diag_ang = math.degrees(math.atan2(dy_line, dx_line))
                     
                     if gubun_name == "상단살대":
-                        t_slope_rad = math.radians(get_slope(get_y_top, px_top))
-                        b_slope_rad = 0.0
+                        t_slope = get_slope(get_y_top, px_top)
+                        b_slope = 0.0
+                        cy_bot = H_mid_top - m_od/2
+                        cy_top = get_y_top(px_top) - get_thick(get_y_top, px_top, m_od/2)
                     else:
-                        t_slope_rad = 0.0 
-                        b_slope_rad = math.radians(get_slope(get_y_bot, px_bot))
+                        t_slope = 0.0 
+                        b_slope = get_slope(get_y_bot, px_bot)
+                        cy_top = H_mid_bot + m_od/2
+                        cy_bot = get_y_bot(px_bot) + get_thick(get_y_bot, px_bot, m_od/2)
                         
-                    t_intersect_rad = angle_rad - t_slope_rad
-                    b_intersect_rad = angle_rad - b_slope_rad
+                    t_intersect = abs(diag_ang - t_slope) % 180
+                    if t_intersect > 90: t_intersect = 180 - t_intersect
+                    d_top_angle = int(round(abs(90.0 - t_intersect)))
                     
-                    d_top_angle = abs(math.degrees(t_intersect_rad)) % 180
-                    if d_top_angle > 90: d_top_angle = 180 - d_top_angle
-                    d_top_angle = int(round(d_top_angle))
+                    b_intersect = abs(diag_ang - b_slope) % 180
+                    if b_intersect > 90: b_intersect = 180 - b_intersect
+                    d_bot_angle = int(round(abs(90.0 - b_intersect)))
                     
-                    d_bot_angle = abs(math.degrees(b_intersect_rad)) % 180
-                    if d_bot_angle > 90: d_bot_angle = 180 - d_bot_angle
-                    d_bot_angle = int(round(d_bot_angle))
-                    
-                    extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
-                    extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
-                    
-                    c2c_len = diag_l_inner + extend_top + extend_bot
-                    laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
+                    c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
+                    diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                     
                     mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
-                    draw_dim_text(ax, mx, my, f"L:{laser_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=10)
+                    draw_dim_text(ax, mx, my, f"L:{diag_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#8B0000', fontsize=10)
                     
                     raw_data.append({
                         "구분": gubun_name, "품명": f"{d_od}mm 파이프",
-                        "재단기장(L)": round(laser_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
+                        "재단기장(L)": round(diag_l, 1), "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
                     })
 
                 is_forward_u = not (is_half or i < mid_idx)
@@ -778,38 +764,32 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                # --- 🔴 내경 벡터 연장을 통한 3D 길이 계산 ---
-                dx_diff = px_top - px_bot
-                dy_diff = py_top - py_bot
-                diag_l_inner = math.hypot(dx_diff, dy_diff)
-                angle_rad = math.atan2(dy_diff, dx_diff)
-                diag_ang = math.degrees(angle_rad)
+                # --- 🔴 [수정] 레이저 가공용 C2C 및 팁 길이 계산 ---
+                dx_diff, dy_diff = px_top - px_bot, py_top - py_bot
+                diag_ang = math.degrees(math.atan2(dy_diff, dx_diff))
                 
-                t_slope_rad = math.radians(get_slope(get_y_bot, px_top))
-                b_slope_rad = 0.0
+                t_slope = get_slope(get_y_bot, px_top)
+                b_slope = 0.0
                 
-                t_intersect_rad = angle_rad - t_slope_rad
-                b_intersect_rad = angle_rad - b_slope_rad
+                t_intersect = abs(diag_ang - t_slope) % 180
+                if t_intersect > 90: t_intersect = 180 - t_intersect
+                d_top_angle = int(round(abs(90.0 - t_intersect)))
                 
-                d_top_angle = abs(math.degrees(t_intersect_rad)) % 180
-                if d_top_angle > 90: d_top_angle = 180 - d_top_angle
-                d_top_angle = int(round(d_top_angle))
+                b_intersect = abs(diag_ang - b_slope) % 180
+                if b_intersect > 90: b_intersect = 180 - b_intersect
+                d_bot_angle = int(round(abs(90.0 - b_intersect)))
                 
-                d_bot_angle = abs(math.degrees(b_intersect_rad)) % 180
-                if d_bot_angle > 90: d_bot_angle = 180 - d_bot_angle
-                d_bot_angle = int(round(d_bot_angle))
+                cy_bot = H_tie
+                cy_top = get_y_bot(px_top) + get_thick(get_y_bot, px_top, m_od/2)
+                c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
                 
-                extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
-                extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
-                
-                c2c_len = diag_l_inner + extend_top + extend_bot
-                laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
+                diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                 
                 mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
-                draw_dim_text(ax, mx, my, f"L:{laser_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#b8860b', fontsize=11)
+                draw_dim_text(ax, mx, my, f"L:{diag_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#b8860b', fontsize=11)
                 
                 raw_data.append({
-                    "구분": "수평내부살대", "품명": f"{d_od}mm 파이프", "재단기장(L)": round(laser_l, 1),
+                    "구분": "수평내부살대", "품명": f"{d_od}mm 파이프", "재단기장(L)": round(diag_l, 1),
                     "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
                 })
 
@@ -867,6 +847,7 @@ def get_6m_count(total_cm):
     return math.ceil(total_cm / 600.0)
 
 def save_ladder_excel_bytes(data, L_cm):
+    """사다리 통합 산출표 전용 엑셀 서식 적용 및 메모리 반환"""
     df = pd.DataFrame(data, columns=["항목", "규격", "수량(개/줄)", "단위길이(cm)", "총연장(cm)", "6m본수/비고"])
     output = io.BytesIO()
     
@@ -942,6 +923,7 @@ def draw_diag_poly(ax, x_start_tip, x_end_tip, y_bot, y_top, w_half, is_forward,
     ax.add_patch(poly)
 
 def run_ladder_system(params):
+    """벽사다리 통합 산출 시스템"""
     L_cm = params['L_cm']
     W_cm = params['W_cm']
     H_truss_cm = params['H_truss_cm']
@@ -994,6 +976,7 @@ def run_ladder_system(params):
     gap_s = (L_cm - t_sub_sub_cm) / n_sec_s
     dx_s = offset_cm 
     
+    # --- 🔴 [수정] 인자 추가: t_chord_top, t_chord_bot ---
     def calc_diag(spacing, v_len, left_r, right_r, t_diag, t_chord_top, t_chord_bot):
         eff_spacing = spacing - left_r - right_r - (2 * offset_cm)
         dx_center = eff_spacing
@@ -1005,20 +988,17 @@ def run_ladder_system(params):
             dx_center = eff_spacing - 2 * W_half
             if dx_center < 0: dx_center = 0.1
             
-        diag_l_inner = math.hypot(dx_center, v_len)
         angle_rad = math.atan2(v_len, dx_center)
         angle_deg = math.degrees(angle_rad)
         cut_angle = 90.0 - angle_deg
         
-        # --- 🔴 내경 벡터 연장을 통한 3D 길이 계산 ---
-        extend_bot = (t_chord_bot / 2) / math.sin(angle_rad)
-        extend_top = (t_chord_top / 2) / math.sin(angle_rad)
+        # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
+        c2c_len = math.hypot(eff_spacing, v_len + t_chord_top/2 + t_chord_bot/2)
+        actual_diag = get_laser_cut_length(c2c_len, t_diag, t_chord_top, angle_deg, t_chord_bot, angle_deg)
         
-        c2c_len = diag_l_inner + extend_bot + extend_top
-        laser_len = get_laser_cut_length(c2c_len, t_diag, t_chord_top, angle_deg, t_chord_bot, angle_deg)
+        return actual_diag, cut_angle, angle_deg, W_half
 
-        return laser_len, cut_angle, angle_deg, W_half
-
+    # --- 🔴 [수정] 호출 부에 상하현재 파이프 두께 전달 ---
     actual_sub_diag_len, sub_cut_angle, angle_s_deg, w_half_s = calc_diag(
         gap_s, actual_sub_v_len, t_sub_sub_cm/2, t_sub_sub_cm/2, t_sub_sub_cm, t_sub_main_cm, t_sub_main_cm)
     
