@@ -31,7 +31,7 @@ except ImportError:
     st.error("openpyxl 라이브러리가 필요합니다.")
 
 # ==============================================================================
-# 공통 설정 및 레이저 알가공(R가공) 전용 함수
+# 공통 설정 및 레이저 가공(R가공) 전용 함수
 # ==============================================================================
 st.set_page_config(page_title="하나천막기업 자재 산출 시스템", layout="wide")
 
@@ -315,12 +315,6 @@ def generate_custom_truss(params):
     def get_chord_y_bot(x):
         return get_y_bot(x) + get_thick(get_y_bot, x, m_od)
 
-    # 중심선 Y좌표 추출 함수 (알가공 계산용)
-    def get_center_y_top(x):
-        return get_y_top(x) - get_thick(get_y_top, x, m_od/2)
-    def get_center_y_bot(x):
-        return get_y_bot(x) + get_thick(get_y_bot, x, m_od/2)
-
     def draw_dim_text(ax, x, y, text, angle=0, color='black', fontsize=11.5):
         if angle > 90: angle -= 180
         elif angle < -90: angle += 180
@@ -499,9 +493,11 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
+                # --- 🟢 기존 각도 로직 완벽 유지 ---
                 dx_line, dy_line = px_top - px_bot, py_top - py_bot
-                diag_ang = math.degrees(math.atan2(dy_line, dx_line))
+                diag_l_inner = math.hypot(dx_line, dy_line)
+                angle_rad = math.atan2(dy_line, dx_line)
+                diag_ang = math.degrees(angle_rad)
                 
                 t_slope = get_slope(get_y_top, px_top)
                 b_slope = get_slope(get_y_bot, px_bot)
@@ -514,10 +510,16 @@ def generate_custom_truss(params):
                 if b_intersect > 90: b_intersect = 180 - b_intersect
                 d_bot_angle = int(round(abs(90.0 - b_intersect)))
 
-                # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
-                cy_bot = get_y_bot(px_bot) + get_thick(get_y_bot, px_bot, m_od/2)
-                cy_top = get_y_top(px_top) - get_thick(get_y_top, px_top, m_od/2)
-                c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
+                # --- 🔴 [알가공용 길이 도출 추가] ---
+                t_slope_rad = math.radians(t_slope)
+                b_slope_rad = math.radians(b_slope)
+                t_intersect_rad = angle_rad - t_slope_rad
+                b_intersect_rad = angle_rad - b_slope_rad
+
+                extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
+                extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
+                
+                c2c_len = diag_l_inner + extend_top + extend_bot
                 diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                 
                 mx, my = (px_bot + px_top) / 2, (py_bot + py_top) / 2
@@ -587,9 +589,11 @@ def generate_custom_truss(params):
                     poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                     ax.add_patch(poly)
                     
-                    # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
-                    dx_line, dy_line = px_top - px_bot, py_top - py_bot
-                    diag_ang = math.degrees(math.atan2(dy_line, dx_line))
+                    # --- 🟢 기존 각도 로직 완벽 유지 ---
+                    dx_diff, dy_diff = px_top - px_bot, py_top - py_bot
+                    diag_l_inner = math.hypot(dx_diff, dy_diff)
+                    angle_rad = math.atan2(dy_diff, dx_diff)
+                    diag_ang = math.degrees(angle_rad)
                     
                     if gubun_name == "상단살대":
                         t_slope = get_slope(get_y_top, px_top)
@@ -606,15 +610,16 @@ def generate_custom_truss(params):
                     if b_intersect > 90: b_intersect = 180 - b_intersect
                     d_bot_angle = int(round(abs(90.0 - b_intersect)))
                     
-                    # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
-                    if gubun_name == "상단살대":
-                        cy_bot = H_mid_top - m_od/2
-                        cy_top = get_y_top(px_top) - get_thick(get_y_top, px_top, m_od/2)
-                    else:
-                        cy_top = H_mid_bot + m_od/2
-                        cy_bot = get_y_bot(px_bot) + get_thick(get_y_bot, px_bot, m_od/2)
-                        
-                    c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
+                    # --- 🔴 [알가공용 길이 도출 추가] ---
+                    t_slope_rad = math.radians(t_slope)
+                    b_slope_rad = math.radians(b_slope)
+                    t_intersect_rad = angle_rad - t_slope_rad
+                    b_intersect_rad = angle_rad - b_slope_rad
+
+                    extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
+                    extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
+                    
+                    c2c_len = diag_l_inner + extend_top + extend_bot
                     diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                     
                     mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
@@ -773,9 +778,11 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
+                # --- 🟢 기존 각도 로직 완벽 유지 ---
                 dx_diff, dy_diff = px_top - px_bot, py_top - py_bot
-                diag_ang = math.degrees(math.atan2(dy_diff, dx_diff))
+                diag_l_inner = math.hypot(dx_diff, dy_diff)
+                angle_rad = math.atan2(dy_diff, dx_diff)
+                diag_ang = math.degrees(angle_rad)
                 
                 t_slope = get_slope(get_y_bot, px_top)
                 b_slope = 0.0
@@ -788,18 +795,23 @@ def generate_custom_truss(params):
                 if b_intersect > 90: b_intersect = 180 - b_intersect
                 d_bot_angle = int(round(abs(90.0 - b_intersect)))
                 
-                # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
-                cy_bot = H_tie
-                cy_top = get_y_bot(px_top) + get_thick(get_y_bot, px_top, m_od/2)
-                c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
+                # --- 🔴 [알가공용 길이 도출 추가] ---
+                t_slope_rad = math.radians(t_slope)
+                b_slope_rad = math.radians(b_slope)
+                t_intersect_rad = angle_rad - t_slope_rad
+                b_intersect_rad = angle_rad - b_slope_rad
+
+                extend_top = (m_od / 2) / math.sin(abs(t_intersect_rad)) if abs(math.sin(t_intersect_rad)) > 0.01 else 0
+                extend_bot = (m_od / 2) / math.sin(abs(b_intersect_rad)) if abs(math.sin(b_intersect_rad)) > 0.01 else 0
                 
-                diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
+                c2c_len = diag_l_inner + extend_top + extend_bot
+                laser_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                 
                 mx, my = (px_bot + px_top)/2, (py_bot + py_top)/2
-                draw_dim_text(ax, mx, my, f"L:{diag_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#b8860b', fontsize=11)
+                draw_dim_text(ax, mx, my, f"L:{laser_l:.1f} ({d_top_angle}°/{d_bot_angle}°)", angle=diag_ang, color='#b8860b', fontsize=11)
                 
                 raw_data.append({
-                    "구분": "수평내부살대", "품명": f"{d_od}mm 파이프", "재단기장(L)": round(diag_l, 1),
+                    "구분": "수평내부살대", "품명": f"{d_od}mm 파이프", "재단기장(L)": round(laser_l, 1),
                     "상단 가공각(°)": d_top_angle, "하단 가공각(°)": d_bot_angle
                 })
 
@@ -997,14 +1009,17 @@ def run_ladder_system(params):
             dx_center = eff_spacing - 2 * W_half
             if dx_center < 0: dx_center = 0.1
             
-        # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
+        # --- 🟢 기존 각도 로직 완벽 유지 ---
         actual_diag = math.sqrt(dx_center**2 + v_len**2)
-        angle_deg = math.degrees(math.atan2(v_len, dx_center))
+        angle_rad = math.atan2(v_len, dx_center)
+        angle_deg = math.degrees(angle_rad)
         cut_angle = 90.0 - angle_deg
         
-        # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
-        c2c_h = v_len + (t_chord_top/2) + (t_chord_bot/2)
-        c2c_len = math.hypot(dx_center, c2c_h)
+        # --- 🔴 [알가공용 길이 도출 추가] ---
+        extend_bot = (t_chord_bot / 2) / math.sin(angle_rad) if math.sin(angle_rad) > 0.01 else 0
+        extend_top = (t_chord_top / 2) / math.sin(angle_rad) if math.sin(angle_rad) > 0.01 else 0
+        
+        c2c_len = actual_diag + extend_bot + extend_top
         laser_len = get_laser_cut_length(c2c_len, t_diag, t_chord_top, angle_deg, t_chord_bot, angle_deg)
 
         return laser_len, cut_angle, angle_deg, W_half
@@ -1270,8 +1285,8 @@ def run_ladder_system(params):
 # Streamlit UI 설정 (탭 방식으로 변경)
 # ==============================================================================
 
-# 🔴 메인 타이틀: 검정 바탕에 백색 폰트로 변경 적용
-st.markdown("<h1 style='text-align: center; background-color: black; color: white; padding: 15px; border-radius: 10px;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
+# 메인 타이틀 (원래 상태로 복구)
+st.markdown("<h1 style='text-align: center; color: #1F497D;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # 큰 분류를 좌우 탭(Tab)으로 나누기
