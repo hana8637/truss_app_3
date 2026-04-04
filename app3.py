@@ -31,7 +31,7 @@ except ImportError:
     st.error("openpyxl 라이브러리가 필요합니다.")
 
 # ==============================================================================
-# 공통 설정 및 레이저 가공(R가공) 전용 함수
+# 공통 설정 및 레이저 알가공(R가공) 전용 함수
 # ==============================================================================
 st.set_page_config(page_title="하나천막기업 자재 산출 시스템", layout="wide")
 
@@ -60,7 +60,6 @@ def get_laser_cut_length(center_len, d_strut, d_chord1, angle1_deg, d_chord2, an
 # [1] 트러스 시스템 함수
 # ==============================================================================
 def save_formatted_excel_bytes(raw_data):
-    """트러스 전용 엑셀 저장 및 서식 지정 로직 (메모리 저장 방식)"""
     df = pd.DataFrame(raw_data)
     df_grouped = df.groupby(["구분", "품명", "재단기장(L)", "상단 가공각(°)", "하단 가공각(°)"]).size().reset_index(name='1대당 수량')
     
@@ -316,6 +315,12 @@ def generate_custom_truss(params):
     def get_chord_y_bot(x):
         return get_y_bot(x) + get_thick(get_y_bot, x, m_od)
 
+    # 중심선 Y좌표 추출 함수 (알가공 계산용)
+    def get_center_y_top(x):
+        return get_y_top(x) - get_thick(get_y_top, x, m_od/2)
+    def get_center_y_bot(x):
+        return get_y_bot(x) + get_thick(get_y_bot, x, m_od/2)
+
     def draw_dim_text(ax, x, y, text, angle=0, color='black', fontsize=11.5):
         if angle > 90: angle -= 180
         elif angle < -90: angle += 180
@@ -494,7 +499,7 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                # --- 🔴 [수정] 레이저 가공용 C2C 및 팁 길이 계산 ---
+                # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
                 dx_line, dy_line = px_top - px_bot, py_top - py_bot
                 diag_ang = math.degrees(math.atan2(dy_line, dx_line))
                 
@@ -508,11 +513,11 @@ def generate_custom_truss(params):
                 b_intersect = abs(diag_ang - b_slope) % 180
                 if b_intersect > 90: b_intersect = 180 - b_intersect
                 d_bot_angle = int(round(abs(90.0 - b_intersect)))
-                
+
+                # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
                 cy_bot = get_y_bot(px_bot) + get_thick(get_y_bot, px_bot, m_od/2)
                 cy_top = get_y_top(px_top) - get_thick(get_y_top, px_top, m_od/2)
                 c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
-                
                 diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                 
                 mx, my = (px_bot + px_top) / 2, (py_bot + py_top) / 2
@@ -582,20 +587,16 @@ def generate_custom_truss(params):
                     poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                     ax.add_patch(poly)
                     
-                    # --- 🔴 [수정] 레이저 가공용 C2C 및 팁 길이 계산 ---
+                    # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
                     dx_line, dy_line = px_top - px_bot, py_top - py_bot
                     diag_ang = math.degrees(math.atan2(dy_line, dx_line))
                     
                     if gubun_name == "상단살대":
                         t_slope = get_slope(get_y_top, px_top)
                         b_slope = 0.0
-                        cy_bot = H_mid_top - m_od/2
-                        cy_top = get_y_top(px_top) - get_thick(get_y_top, px_top, m_od/2)
                     else:
                         t_slope = 0.0 
                         b_slope = get_slope(get_y_bot, px_bot)
-                        cy_top = H_mid_bot + m_od/2
-                        cy_bot = get_y_bot(px_bot) + get_thick(get_y_bot, px_bot, m_od/2)
                         
                     t_intersect = abs(diag_ang - t_slope) % 180
                     if t_intersect > 90: t_intersect = 180 - t_intersect
@@ -605,6 +606,14 @@ def generate_custom_truss(params):
                     if b_intersect > 90: b_intersect = 180 - b_intersect
                     d_bot_angle = int(round(abs(90.0 - b_intersect)))
                     
+                    # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
+                    if gubun_name == "상단살대":
+                        cy_bot = H_mid_top - m_od/2
+                        cy_top = get_y_top(px_top) - get_thick(get_y_top, px_top, m_od/2)
+                    else:
+                        cy_top = H_mid_bot + m_od/2
+                        cy_bot = get_y_bot(px_bot) + get_thick(get_y_bot, px_bot, m_od/2)
+                        
                     c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
                     diag_l = get_laser_cut_length(c2c_len, d_od, m_od, d_top_angle, m_od, d_bot_angle)
                     
@@ -764,7 +773,7 @@ def generate_custom_truss(params):
                 poly = plt.Polygon(pts, facecolor='#f1c40f', edgecolor='black', linewidth=1.2, zorder=3)
                 ax.add_patch(poly)
                 
-                # --- 🔴 [수정] 레이저 가공용 C2C 및 팁 길이 계산 ---
+                # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
                 dx_diff, dy_diff = px_top - px_bot, py_top - py_bot
                 diag_ang = math.degrees(math.atan2(dy_diff, dx_diff))
                 
@@ -779,6 +788,7 @@ def generate_custom_truss(params):
                 if b_intersect > 90: b_intersect = 180 - b_intersect
                 d_bot_angle = int(round(abs(90.0 - b_intersect)))
                 
+                # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
                 cy_bot = H_tie
                 cy_top = get_y_bot(px_top) + get_thick(get_y_bot, px_top, m_od/2)
                 c2c_len = math.hypot(px_top - px_bot, cy_top - cy_bot)
@@ -976,7 +986,6 @@ def run_ladder_system(params):
     gap_s = (L_cm - t_sub_sub_cm) / n_sec_s
     dx_s = offset_cm 
     
-    # --- 🔴 [수정] 인자 추가: t_chord_top, t_chord_bot ---
     def calc_diag(spacing, v_len, left_r, right_r, t_diag, t_chord_top, t_chord_bot):
         eff_spacing = spacing - left_r - right_r - (2 * offset_cm)
         dx_center = eff_spacing
@@ -988,17 +997,18 @@ def run_ladder_system(params):
             dx_center = eff_spacing - 2 * W_half
             if dx_center < 0: dx_center = 0.1
             
-        angle_rad = math.atan2(v_len, dx_center)
-        angle_deg = math.degrees(angle_rad)
+        # --- 🟢 회원님 오리지널 각도 산출 공식 완벽 복원 ---
+        actual_diag = math.sqrt(dx_center**2 + v_len**2)
+        angle_deg = math.degrees(math.atan2(v_len, dx_center))
         cut_angle = 90.0 - angle_deg
         
-        # --- 🔴 레이저 알가공 길이 도출 (Tip-to-Tip) ---
-        c2c_len = math.hypot(eff_spacing, v_len + t_chord_top/2 + t_chord_bot/2)
-        actual_diag = get_laser_cut_length(c2c_len, t_diag, t_chord_top, angle_deg, t_chord_bot, angle_deg)
-        
-        return actual_diag, cut_angle, angle_deg, W_half
+        # --- 🔴 길이(L)만 레이저 알가공 기준으로 뽑아냄 ---
+        c2c_h = v_len + (t_chord_top/2) + (t_chord_bot/2)
+        c2c_len = math.hypot(dx_center, c2c_h)
+        laser_len = get_laser_cut_length(c2c_len, t_diag, t_chord_top, angle_deg, t_chord_bot, angle_deg)
 
-    # --- 🔴 [수정] 호출 부에 상하현재 파이프 두께 전달 ---
+        return laser_len, cut_angle, angle_deg, W_half
+
     actual_sub_diag_len, sub_cut_angle, angle_s_deg, w_half_s = calc_diag(
         gap_s, actual_sub_v_len, t_sub_sub_cm/2, t_sub_sub_cm/2, t_sub_sub_cm, t_sub_main_cm, t_sub_main_cm)
     
@@ -1260,8 +1270,8 @@ def run_ladder_system(params):
 # Streamlit UI 설정 (탭 방식으로 변경)
 # ==============================================================================
 
-# 메인 타이틀 (중앙 정렬)
-st.markdown("<h1 style='text-align: center; color: #1F497D;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
+# 🔴 메인 타이틀: 검정 바탕에 백색 폰트로 변경 적용
+st.markdown("<h1 style='text-align: center; background-color: black; color: white; padding: 15px; border-radius: 10px;'>⛺ 하나천막기업 자재산출 및 도면 시스템</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
 # 큰 분류를 좌우 탭(Tab)으로 나누기
